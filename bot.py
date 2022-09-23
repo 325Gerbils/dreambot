@@ -404,6 +404,14 @@ async def tile(ctx, *prompt):
 
     await ctx.send(f'tiled by {ctx.author.mention}', file=discord.File(tiled_fname))
 
+@bot.command()
+async def interrogate(ctx, file):
+    from clip_interrogator import interrogate
+    response = requests.get(ctx.message.attachments[0].url)
+    input_img = Image.open(BytesIO(response.content)).convert('RGB')
+    response = interrogate(input_img, models=['ViT-L/14'])
+    await ctx.send(f'clip-interrogator thinks your picture looks like `{response}`', file=discord.File(tiled_fname))
+
 # go!
 print("Connected")
 bot.run(TOKEN)

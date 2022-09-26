@@ -83,15 +83,84 @@ def reset_conv():
 import torch
 from torch import autocast
 import gc
+
+from transformers import CLIPTextModel, CLIPTokenizer
+from diffusers import AutoencoderKL, UNet2DConditionModel
+from diffusers import DDIMScheduler, LMSDiscreteScheduler, PNDMScheduler
+
+model_name = "./stable-diffusion-v1-4"
+
+torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+offload_device = "cpu"
+
 # soon
 # import open_clip as clip
 # clip_model = clip.create_model("ViT-B-32", pretrained="laion2b_s34b_b79k")
+
+vae = AutoencoderKL.from_pretrained(model_name, subfolder="vae")
+tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+try:
+    text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder="text_encoder")
+except:
+    print("Text encoder could not be loaded from the repo specified for some reason, falling back to the vit-l repo")
+    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
+
+unet = UNet2DConditionModel.from_pretrained(model_name, subfolder="unet")
+
+scheduler = LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
+
+vae = vae.to(offload_device).half()
+text_encoder = text_encoder.to(offload_device).half()
+unet = unet.to(torch_device).half()
+
+def requires_grad(model, val=False):
+    for param in model.parameters():
+        param.requires_grad = val
+
+requires_grad(vae)
+requires_grad(text_encoder)
+requires_grad(unet)
+
+def load_learned_embed_in_clip(learned_embeds_path, text_encoder, tokenizer, token=None):
+
+    loaded_learned_embeds = torch.load(learned_embeds_path, map_location="cpu")
+    
+    trained_token = list(loaded_learned_embeds.keys())[0]
+    embeds = loaded_learned_embeds[trained_token]
+
+    dtype = text_encoder.get_input_embeddings().weight.dtype
+    embeds.to(dtype)
+
+    token = token if token is not None else trained_token
+    num_added_tokens = tokenizer.add_tokens(token)
+
+    text_encoder.resize_token_embeddings(len(tokenizer))
+    
+    token_id = tokenizer.convert_tokens_to_ids(token)
+    text_encoder.get_input_embeddings().weight.data[token_id] = embeds
+
+    return text_encoder, tokenizer
+
+
+print('loading concepts....')
+for concept in os.listdir('concepts'):
+    token_name = f'<{concept.split(".")[0]}>'
+    print(f'loading {token_name}')
+    text_encoder, tokenizer = load_learned_embed_in_clip(f'concepts/{concept}', text_encoder, tokenizer, token_name)
+
+print('done')
+
 loaded_model = 'text2img'
 last_used = time.time()
 
 print("Loading stable diffusion pipeline")
 from diffusers import StableDiffusionPipeline
-pipe = StableDiffusionPipeline.from_pretrained("./stable-diffusion-v1-4", revision="fp16", torch_dtype=torch.float16)
+pipe = StableDiffusionPipeline.from_pretrained(
+    "./stable-diffusion-v1-4",
+    text_encoder=text_encoder,
+    tokenizer=tokenizer,
+    revision="fp16",
+    torch_dtype=torch.float16)
 pipe = pipe.to("cuda")
 
 torch.manual_seed(0)
@@ -270,6 +339,7 @@ async def palette(ctx, *prompt):
 @bot.command()
 async def load_model(ctx, model):
     global loaded_model, pipe
+    global unet, scheduler, vae, text_encoder, tokenizer
     if model == 'text2img':
         if loaded_model == 'text2img':
             return
@@ -280,7 +350,12 @@ async def load_model(ctx, model):
         reset_conv()
         from diffusers import StableDiffusionPipeline
         patch_conv(padding_mode='zeros')
-        pipe = StableDiffusionPipeline.from_pretrained("./stable-diffusion-v1-4", revision="fp16", torch_dtype=torch.float16)
+        pipe = StableDiffusionPipeline.from_pretrained(
+            "./stable-diffusion-v1-4",
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            revision="fp16",
+            torch_dtype=torch.float16)
         pipe = pipe.to("cuda")
         torch.manual_seed(0)
         loaded_model = 'text2img'
@@ -296,7 +371,12 @@ async def load_model(ctx, model):
         reset_conv()
         from diffusers import StableDiffusionImg2ImgPipeline
         patch_conv(padding_mode='zeros')
-        pipe = StableDiffusionImg2ImgPipeline.from_pretrained("./stable-diffusion-v1-4", revision="fp16", torch_dtype=torch.float16)
+        pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
+            "./stable-diffusion-v1-4",
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            revision="fp16",
+            torch_dtype=torch.float16)
         pipe = pipe.to("cuda")
         torch.manual_seed(0)
         loaded_model = 'img2img'
@@ -312,7 +392,12 @@ async def load_model(ctx, model):
         reset_conv()
         from diffusers import StableDiffusionInpaintPipeline
         patch_conv(padding_mode='zeros')
-        pipe = StableDiffusionInpaintPipeline.from_pretrained("./stable-diffusion-v1-4", revision="fp16", torch_dtype=torch.float16)
+        pipe = StableDiffusionInpaintPipeline.from_pretrained(
+            "./stable-diffusion-v1-4",
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            revision="fp16",
+            torch_dtype=torch.float16)
         pipe = pipe.to("cuda")
         torch.manual_seed(0)
         loaded_model = 'inpaint'
@@ -328,7 +413,12 @@ async def load_model(ctx, model):
         reset_conv()
         from diffusers import StableDiffusionPipeline
         patch_conv(padding_mode='circular')
-        pipe = StableDiffusionPipeline.from_pretrained("./stable-diffusion-v1-4", revision="fp16", torch_dtype=torch.float16)
+        pipe = StableDiffusionPipeline.from_pretrained(
+            "./stable-diffusion-v1-4",
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            revision="fp16",
+            torch_dtype=torch.float16)
         pipe = pipe.to("cuda")
         torch.manual_seed(0)
         loaded_model = 'seamless'
@@ -405,12 +495,36 @@ async def tile(ctx, *prompt):
     await ctx.send(f'tiled by {ctx.author.mention}', file=discord.File(tiled_fname))
 
 @bot.command()
-async def interrogate(ctx, file):
-    from clip_interrogator import interrogate
+async def interrogate(ctx):
+    await ctx.send('starting clip-interrogator...')
+    print('Interrogating...')
+    from clip_interrogator.clip_interrogator import interrogate
     response = requests.get(ctx.message.attachments[0].url)
     input_img = Image.open(BytesIO(response.content)).convert('RGB')
     response = interrogate(input_img, models=['ViT-L/14'])
-    await ctx.send(f'clip-interrogator thinks your picture looks like `{response}`', file=discord.File(tiled_fname))
+    print('done')
+    await ctx.send(f'clip-interrogator thinks your picture looks like `{response}`')
+
+@bot.command()
+async def get_concept(ctx, conceptname):
+    global tokenizer, text_encoder
+
+    downloadurl = f'https://huggingface.co/sd-concepts-library/{conceptname}/resolve/main/learned_embeds.bin'
+    print(downloadurl)
+
+    # download downloadurl into "concepts/{conceptname}.bin"
+    response = requests.get(downloadurl)
+
+    with open(f'concepts/{conceptname}.bin', 'bw') as f:
+        f.write(response.content)
+        f.close()
+
+    token_name = f'<{conceptname.split(".")[0]}>'
+    print(f'loading {token_name}')
+    text_encoder, tokenizer = load_learned_embed_in_clip(f'concepts/{conceptname}.bin', text_encoder, tokenizer, token_name)
+    
+    await ctx.send(f'finished downloading `<{conceptname}>` from `huggingface.co/sd-concepts-library`')
+    
 
 # go!
 print("Connected")

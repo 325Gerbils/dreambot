@@ -429,11 +429,11 @@ async def load_model(ctx, model):
 
 @bot.command()
 async def clear_cuda_mem(ctx):
-    global torch
-    torch.cuda.empty_cache()
+    global pipe, torch
+    del pipe
     gc.collect()
+    torch.cuda.empty_cache()
     await ctx.send('cuda cleared')
-
 
 @bot.command()
 async def last_used(ctx):

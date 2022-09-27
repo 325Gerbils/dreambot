@@ -142,13 +142,16 @@ def call_stable_diffusion(prompt, kwargs):
         'guidance_scale': float(kwargs['scale']) if 'scale' in kwargs else 7.5,
         'height': int(kwargs['height']) if 'height' in kwargs else 512,
         'width': int(kwargs['width']) if 'width' in kwargs else 512,
-        'init_img': kwargs['init_img'] if loaded_model in ['inpaint', 'img2img', 'img2img_seamless'] else None,
+        'init_image': kwargs['init_image'] if loaded_model in ['inpaint', 'img2img', 'img2img_seamless'] else None,
         'mask_image': kwargs['mask_image'] if loaded_model in ['inpaint'] else None
     }
-    if kwargs['init_img'] == None:
-        del kwargs['init_img']
+    if kwargs['init_image'] == None:
+        del kwargs['init_image']
     if kwargs['mask_image'] == None:
         del kwargs['mask_image']
+    if loaded_model in ['inpaint', 'img2img']:
+        del kwargs['width']
+        del kwargs['height']
 
     with autocast("cuda"):
         image = pipe(prompt, **kwargs).images[0]
@@ -245,7 +248,7 @@ async def dream(ctx, *prompt):
     if len(ctx.message.attachments) > 0:
         input_img = PIL_from_url(ctx.message.attachments[0].url)
         input_img = autoresize(input_img, 380000)
-        kwargs['init_img'] = input_img
+        kwargs['init_image'] = input_img
         if len(ctx.message.attachments) > 1:
             mask = PIL_from_url(ctx.message.attachments[1].url)
             kwargs['mask_image'] = mask

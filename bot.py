@@ -250,15 +250,17 @@ async def dream(ctx, *prompt):
             mask = PIL_from_url(ctx.message.attachments[1].url)
             kwargs['mask_image'] = mask
     
-    # figure out pipeline
-    if len(ctx.message.attachments) == 1 and loaded_model not in ['inpaint']:
-        await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model inpaint` and try again.')
+    # require an image pipeline if any attachment
+    if len(ctx.message.attachments) == 1 and loaded_model not in ['img2img']: 
+        await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model img2img` and try again. you need to provide an initial image for img2img to work')
         return
-    if len(ctx.message.attachments) > 0 and loaded_model not in ['inpaint', 'img2img']:
-        await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model img2img` and try again.')
+    # require inpaint pipeline if more than 1 attachment
+    if len(ctx.message.attachments) > 1 and loaded_model not in ['inpaint']: 
+        await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model inpaint` and try again. you need to provide 2 images (background, mask) for inpaint to work')
         return
-    if len(ctx.message.attachments) <= 0 and loaded_model not in ['seamless', 'text2img']:
-        await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model text2img` and try again.')
+    # require a text pipeline if no attachment
+    if len(ctx.message.attachments) <= 0 and loaded_model not in ['seamless', 'text2img']: 
+        await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model text2img` and try again. text2img does not work with image attachments')
         return
     
     # generation loop

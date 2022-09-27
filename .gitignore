@@ -5,3 +5,4 @@ stable-diffusion-v1-4/safety_checker/pytorch_model.bin
 stable-diffusion-v1-4/unet/diffusion_pytorch_model.bin
 stable-diffusion-v1-4/vae/diffusion_pytorch_model.bin
 stable-diffusion-v1-4/text_encoder/pytorch_model.bin
+__pycache__/*

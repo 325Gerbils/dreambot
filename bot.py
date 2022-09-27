@@ -85,8 +85,7 @@ from torch import autocast
 import gc
 
 from transformers import CLIPTextModel, CLIPTokenizer
-from diffusers import AutoencoderKL, UNet2DConditionModel
-from diffusers import DDIMScheduler, LMSDiscreteScheduler, PNDMScheduler
+import diffusers as diffy
 
 model_name = "./stable-diffusion-v1-4"
 
@@ -97,7 +96,7 @@ offload_device = "cpu"
 # import open_clip as clip
 # clip_model = clip.create_model("ViT-B-32", pretrained="laion2b_s34b_b79k")
 
-vae = AutoencoderKL.from_pretrained(model_name, subfolder="vae")
+vae = diffy.AutoencoderKL.from_pretrained(model_name, subfolder="vae")
 tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
 try:
     text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder="text_encoder")
@@ -105,9 +104,9 @@ except:
     print("Text encoder could not be loaded from the repo specified for some reason, falling back to the vit-l repo")
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
 
-unet = UNet2DConditionModel.from_pretrained(model_name, subfolder="unet")
+unet = diffy.UNet2DConditionModel.from_pretrained(model_name, subfolder="unet")
 
-scheduler = LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
+scheduler = diffy.LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
 
 vae = vae.to(offload_device).half()
 text_encoder = text_encoder.to(offload_device).half()
@@ -152,18 +151,6 @@ print('done')
 
 loaded_model = 'text2img'
 last_used = time.time()
-
-print("Loading stable diffusion pipeline")
-from diffusers import StableDiffusionPipeline
-pipe = StableDiffusionPipeline.from_pretrained(
-    "./stable-diffusion-v1-4",
-    text_encoder=text_encoder,
-    tokenizer=tokenizer,
-    revision="fp16",
-    torch_dtype=torch.float16)
-pipe = pipe.to("cuda")
-
-torch.manual_seed(0)
 
 def autoresize(img, max_p):
     img_width, img_height = img.size
@@ -336,103 +323,70 @@ async def palette(ctx, *prompt):
         elapsed_time = int(time.time() - start_time)
         await ctx.send(f"color palette for \"{prompt}\" by {ctx.author.mention} in {elapsed_time}s with seed {seed} ({i+1}/{n_images})\n{hex_colors}", files=[discord.File(pal_img_fname), discord.File(thumb_fname)])
 
-@bot.command()
-async def load_model(ctx, model):
-    global loaded_model, pipe
-    global unet, scheduler, vae, text_encoder, tokenizer
-    if model == 'text2img':
-        if loaded_model == 'text2img':
-            return
-        await ctx.send('Loading stable diffusion text2img pipeline...')
-        pipe = None
-        torch.cuda.empty_cache()
-        gc.collect()
-        reset_conv()
-        from diffusers import StableDiffusionPipeline
-        patch_conv(padding_mode='zeros')
-        pipe = StableDiffusionPipeline.from_pretrained(
-            "./stable-diffusion-v1-4",
-            text_encoder=text_encoder,
-            tokenizer=tokenizer,
-            revision="fp16",
-            torch_dtype=torch.float16)
-        pipe = pipe.to("cuda")
-        torch.manual_seed(0)
-        loaded_model = 'text2img'
-        await ctx.send('text2img model loaded. happy generating!')
+genmodes = {
+    "text2img": {
+        "pipeline": "StableDiffusionPipeline",
+        "pad_mode": "zeros"
+    },
+    "img2img": {
+        "pipeline": "StableDiffusionImg2ImgPipeline",
+        "pad_mode": "zeros"
+    },
+    "inpaint": {
+        "pipeline": "StableDiffusionInpaintPipeline",
+        "pad_mode": "zeros"
+    },
+    "seamless": {
+        "pipeline": "StableDiffusionPipeline",
+        "pad_mode": "circular"
+    },
+    "img2img_seamless": {
+        "pipeline": "StableDiffusionImg2ImgPipeline",
+        "pad_mode": "circular"
+    },
+}
 
-    elif model == 'img2img':
-        if loaded_model == 'img2img':
-            return
-        await ctx.send('Loading stable diffusion img2img pipeline...')
-        pipe = None
-        torch.cuda.empty_cache()
-        gc.collect()
-        reset_conv()
-        from diffusers import StableDiffusionImg2ImgPipeline
-        patch_conv(padding_mode='zeros')
-        pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
-            "./stable-diffusion-v1-4",
-            text_encoder=text_encoder,
-            tokenizer=tokenizer,
-            revision="fp16",
-            torch_dtype=torch.float16)
-        pipe = pipe.to("cuda")
-        torch.manual_seed(0)
-        loaded_model = 'img2img'
-        await ctx.send('img2img model loaded. happy generating!')
-
-    elif model == 'inpaint':
-        if loaded_model == 'inpaint':
-            return
-        await ctx.send('Loading stable diffusion inpainting pipeline...')
-        pipe = None
-        torch.cuda.empty_cache()
-        gc.collect()
-        reset_conv()
-        from diffusers import StableDiffusionInpaintPipeline
-        patch_conv(padding_mode='zeros')
-        pipe = StableDiffusionInpaintPipeline.from_pretrained(
-            "./stable-diffusion-v1-4",
-            text_encoder=text_encoder,
-            tokenizer=tokenizer,
-            revision="fp16",
-            torch_dtype=torch.float16)
-        pipe = pipe.to("cuda")
-        torch.manual_seed(0)
-        loaded_model = 'inpaint'
-        await ctx.send('inpainting model loaded. happy generating!')
-
-    elif model == 'seamless':
-        if loaded_model == 'seamless':
-            return
-        await ctx.send('Loading stable diffusion seamless text2img pipeline...')
-        pipe = None
-        torch.cuda.empty_cache()
-        gc.collect()
-        reset_conv()
-        from diffusers import StableDiffusionPipeline
-        patch_conv(padding_mode='circular')
-        pipe = StableDiffusionPipeline.from_pretrained(
-            "./stable-diffusion-v1-4",
-            text_encoder=text_encoder,
-            tokenizer=tokenizer,
-            revision="fp16",
-            torch_dtype=torch.float16)
-        pipe = pipe.to("cuda")
-        torch.manual_seed(0)
-        loaded_model = 'seamless'
-        await ctx.send('seamless model loaded. happy generating!')
-
-    else:
-        await ctx.send(f'model {model} not found: try using \'text2img\', \'img2img\', \'inpaint\', or \'seamless\'')
-
-@bot.command()
-async def clear_cuda_mem(ctx):
+def clear_cuda_memory():
     global pipe, torch
     del pipe
     gc.collect()
     torch.cuda.empty_cache()
+
+def load_pipeline(model):
+    global loaded_model, pipe
+    if loaded_model == model:
+        return f'model {model} already loaded'
+    if model not in genmodes:
+        return f'model {model} not found: try using \'text2img\', \'img2img\', \'inpaint\', or \'seamless\''
+    
+    global unet, scheduler, vae, text_encoder, tokenizer
+    
+    genmode = genmodes[model]
+    clear_cuda_memory()
+    reset_conv()
+    pipeline = getattr(diffy,genmode["pipeline"])
+    patch_conv(padding_mode=genmode["pad_mode"])
+    pipe = pipeline.from_pretrained(
+        "./stable-diffusion-v1-4",
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        revision="fp16",
+        torch_dtype=torch.float16)
+    pipe = pipe.to("cuda")
+    torch.manual_seed(0)
+    loaded_model = model
+
+load_pipeline("text2img")
+
+@bot.command()
+async def load_model(ctx, model):
+    await ctx.send('Loading stable diffusion '+model+' pipeline...')
+    load_pipeline(model)
+    await ctx.send(model+' model loaded. happy generating!')
+
+@bot.command()
+async def clear_cuda_mem(ctx):
+    clear_cuda_memory()
     await ctx.send('cuda cleared')
 
 @bot.command()

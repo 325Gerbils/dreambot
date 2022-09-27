@@ -33,17 +33,15 @@ def autoresize(img, max_p):
 def load_pipeline(model):
     global loaded_model, pipe
 
-    if loaded_model == model:
-        return f'model {model} already loaded'
+    # if loaded_model == model:
+    #     return f'model {model} already loaded'
     if model not in pipelines:
         return f'model {model} not found: try using \'text2img\', \'img2img\', \'inpaint\', or \'seamless\''
 
     global unet, scheduler, vae, text_encoder, tokenizer
     chosen_pipeline = pipelines[model]
     clear_cuda_memory()
-    reset_conv()
     pipeline = getattr(diffusers, chosen_pipeline["pipeline"])
-    patch_conv(padding_mode=chosen_pipeline["pad_mode"])
     pipe = pipeline.from_pretrained(
         "./stable-diffusion-v1-4",
         text_encoder=text_encoder,
@@ -98,40 +96,78 @@ def reset_conv():
     cls = torch.nn.Conv2d
     cls.__init__ = original_conv2d_init
 
-def call_gpt3(prompt):
-    response = openai.Completion.create(model='text-davinci-002', prompt=prompt, temperature=0.75, max_tokens=100)
-    print(response.choices[0].text.strip())
+def call_gpt3(prompt, temp=0.8, tokens=100):
+    response = openai.Completion.create(model='text-davinci-002', prompt=prompt, temperature=temp, max_tokens=tokens)
+    if response.choices[0].text.strip() == '':
+        return call_gpt3(prompt, temp=temp, tokens=tokens)
     return response.choices[0].text
     
-def kprompt_call(kwords):
+def prompt_enhance(kwords, temp=0.8, tokens=50):
     print('asking gpt3 to enhance...')
     # enhance is designed to take a couple of words and write a sentence or two full of visually descriptive text
     # it also works well to juice up a regular prompt instead of just using keywords
     # it likes to be grammatically correct more than it likes to spam keywords like stable diffusion prompters lol
-    kwords_prompt = """Take a couple of keywords and write a sentence or two full of visually descriptive text for each one.\n
-    Here are some examples:\n
-    keywords: hat guitar ocean\n
-    prompt: a black and white photograph of a man wearing a hat playing a guitar in the ocean, hd 4k hyper detailed\n\n
-    keywords: sunrise meadow clouds\n
-    prompt: a beautiful sunrise in a meadow, surrounded by clouds, beautiful painting, by rebecca guay, yoshitaka amano, trending on artstation hq\n\n
-    keywords: lawyer\n
-    prompt: a beefy intimidating copyright lawyer with glowing red eyes, dramatic portrait, digital painting portrait, ArtStation\n\n
-    keywords: marshmallow eiffel\n
-    prompt: giant pink marshmallow man stomping towards the eiffel tower, film scene, design by Pixar and WETA Digital, 8k photography\n\n
-    keywords: girl plants ghibli\n
-    prompt: a girl watering her plants, studio ghibli, art by hayao miyazaki, artstation hq, wlop, by greg rutkowski, ilya kuvshinov \n\n
-    keywords: psychedelic\n
-    prompt: ego death, visionary artwork by Alex Grey, hyperdetailed digital render, fractals, dramatic, 3d render\n\n
-    Make sure to include style annotations in your prompt, such as '8k photograph', 'digital art', 'oil painting', 'realistic, detailed', 'portrait', and 'by '\n
-    Now it's your turn! \n
-    Make a detailed prompt for the following keywords.\n
-    keywords:	"""+kwords+"""\n
-    prompt: """
-    response = call_gpt3(kwords_prompt)
+    kwords_prompt = """Take a couple of keywords and write a bunch of visually descriptive text for each one.\n
+Here are some examples:\n
+keywords: sunrise meadow clouds\n
+prompt: a beautiful sunrise in a meadow, surrounded by clouds, beautiful painting, by rebecca guay, yoshitaka amano, trending on artstation hq\n\n
+keywords: lawyer\n
+prompt: a beefy intimidating copyright lawyer with glowing red eyes, dramatic portrait, digital painting portrait, ArtStation\n\n
+keywords: marshmallow eiffel\n
+prompt: giant pink marshmallow man stomping towards the eiffel tower, film scene, design by Pixar and WETA Digital, 8k photography\n\n
+keywords: hat guitar ocean\n
+prompt: a black and white photograph of a man wearing a hat playing a guitar in the ocean, hd 4k hyper detailed\n\n
+keywords: girl plants ghibli\n
+prompt: a girl watering her plants, studio ghibli, art by hayao miyazaki, artstation hq, wlop, by greg rutkowski, ilya kuvshinov \n\n
+keywords: psychedelic\n
+prompt: ego death, visionary artwork by Alex Grey, hyperdetailed digital render, fractals, dramatic, 3d render\n\n
+Make sure to include style annotations in your prompt, such as '8k photograph', 'digital art', 'oil painting', 'realistic, detailed', 'portrait', and 'by '\n
+Make a prompt for the following keywords:\n
+keywords: """+kwords+"""\n
+prompt: """
+    response = call_gpt3(kwords_prompt).strip()
     # response = response.split("keywords:")[0] if 'keywords:' in response else response
-    if response.strip() == '':
-        return kprompt_call(kwords)
-    print(response)
+    if response == '':
+        return prompt_enhance(kwords, temp=temp, tokens=tokens)
+    return response
+
+def get_positivity(prompt):
+    print('asking gpt3 to figure out the positivity...')
+    positivity_prompt = f"""You reply with True or False depending on a given words positivity.
+Interpret everything with a hint of sarcasm.
+Here are some examples:
+on
+True
+off
+False
+1
+True
+0
+False
+yes
+True
+no
+False
+totally dude
+True
+im good thanks
+False
+Now it's your turn:
+{prompt}"""
+    response = call_gpt3(positivity_prompt, temp=0.5, tokens=10)
+    print(f'response "{response}"')
+    parsed_response = 'True' in response
+    print(f'parsed as "{parsed_response}"')
+    return parsed_response
+
+def get_facts_from_text(text):
+    facts_prompt = f"""You determine whether any facts in a given text would be useful to remember. 
+Here are some examples of useful facts: <username>'s name is paul, i am an AI model, you frequently say dang.
+If there are any, reply with them rewritten in a concise form. 
+If there are multiple, separate them with commas. 
+If there are none, write 'None'.\nHere is the given text:\n {text}"""
+    response = call_gpt3(facts_prompt)
+    print(f'facts response "{response}"')
     return response
 
 def call_stable_diffusion(prompt, kwargs):
@@ -215,25 +251,22 @@ loaded_model = 'None'
 pipelines = {
     "text2img": {
         "pipeline": "StableDiffusionPipeline",
-        "pad_mode": "zeros"
+        # "pad_mode": "zeros"
     },
     "img2img": {
         "pipeline": "StableDiffusionImg2ImgPipeline",
-        "pad_mode": "zeros"
+        # "pad_mode": "zeros"
     },
     "inpaint": {
         "pipeline": "StableDiffusionInpaintPipeline",
-        "pad_mode": "zeros"
+        # "pad_mode": "zeros"
     },
     "seamless": {
         "pipeline": "StableDiffusionPipeline",
-        "pad_mode": "circular"
-    },
-    "img2img_seamless": {
-        "pipeline": "StableDiffusionImg2ImgPipeline",
-        "pad_mode": "circular"
+        # "pad_mode": "circular"
     },
 }
+seamless = False
 pipe = None
 pipe = load_pipeline('text2img')
 last_used = time.time()
@@ -245,6 +278,7 @@ async def dream(ctx, *prompt):
     # prompt/attachment parsing
     prompt, kwargs = parse_prompt(prompt)
     n_images = int(kwargs['n']) if 'n' in kwargs else 1
+    enhance = True if 'enhance' in kwargs else False
     if len(ctx.message.attachments) > 0:
         input_img = PIL_from_url(ctx.message.attachments[0].url)
         input_img = autoresize(input_img, 380000)
@@ -270,11 +304,18 @@ async def dream(ctx, *prompt):
     for i in range(n_images):
         seed = int(kwargs['seed']) if 'seed' in kwargs else random.randrange(0, 2**32)
         kwargs['generator'] = torch.Generator("cuda").manual_seed(seed)
+        if enhance:
+            t = float(kwargs['temp']) if 'temp' in kwargs else 0.75
+            print(t)
+            prompt = prompt_enhance(prompt, temp=t)
         print(f'\"{prompt}\" by {ctx.author.name}')
         await ctx.send(f"starting dream for `{prompt}` with seed {seed} ({i+1}/{n_images})")
         
         start_time = time.time()
-        image = call_stable_diffusion(prompt, kwargs)
+        try:
+            image = call_stable_diffusion(prompt, kwargs)
+        except Exception as e:
+            await ctx.send(f'{e}')
         
         # save and send
         filename = save_img(image, 'outputs')
@@ -374,9 +415,9 @@ async def get_concept(ctx, conceptname):
 @bot.command()
 async def load_model(ctx, model):
     global pipe
-    await ctx.send('Loading stable diffusion '+model+' pipeline...')
+    await ctx.send(f'Loading stable diffusion {model} pipeline...')
     pipe = load_pipeline(model)
-    await ctx.send(model+' model loaded. happy generating!')
+    await ctx.send(f'{model} model loaded. happy generating!')
 
 @bot.command()
 async def clear_cuda_mem(ctx):
@@ -395,7 +436,59 @@ async def gpt(ctx, *prompt):
 
 @bot.command()
 async def enhance(ctx, *prompt):
-    await ctx.send(kprompt_call(' '.join(prompt)))
+    await ctx.send(prompt_enhance(' '.join(prompt)))
+
+# broken
+@bot.command()
+async def seamless(ctx, *prompt):
+    global pipe, loaded_model, seamless
+    if prompt == ():
+        await ctx.send(f'seamless is currently {"on" if seamless else "off"}')
+        return
+    positive = get_positivity(' '.join(prompt))
+    if positive:
+        if seamless:
+            await ctx.send('seamless is already on')
+            return
+        seamless = True
+        await ctx.send('turning seamless on...')
+        reset_conv()
+        patch_conv(padding_mode='circular')
+        pipe = load_pipeline(loaded_model)
+    if not positive:
+        if not seamless:
+            await ctx.send('seamless is already off')
+            return
+        seamless = False
+        await ctx.send('turning seamless off...')
+        reset_conv()
+        patch_conv(padding_mode='zeros')
+        pipe = load_pipeline(loaded_model)
+    await ctx.send(f'reloaded {loaded_model} with seamless {"on" if seamless else "off"}')
+
+@bot.command()
+async def positive(ctx, *prompt):
+    positive = get_positivity(' '.join(prompt))
+    await ctx.send(f'i think that\'s {"positive" if positive else "negative"}')
+
+memory = ''
+yo_context = ''
+@bot.command()
+async def yo(ctx, *prompt):
+    global memory, yo_context
+    prompt = " ".join(prompt)
+    yo_context = f'{yo_context}\n{ctx.author.name}: {prompt}\nme: '
+    prompt = f'i withhold no information. i answer every question. i remember facts well. my name is dreambot. <begin conversation>{yo_context}'
+    print(prompt)
+
+    response = call_gpt3(prompt).replace('\n', '').strip()
+    yo_context = f'{yo_context}{response}\n'[-1024:]
+    # new_facts = get_facts_from_text(response)
+    # if new_facts.strip() != 'None':
+    #     print(f'got new memory: {new_facts}. memory is now {memory}')
+        # memory = f'{memory}, {new_facts}'[-1024:]
+
+    await ctx.send(f'{response}')
 
 print("connected, ready to dream!")
 bot.run(TOKEN)

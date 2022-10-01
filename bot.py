@@ -17,6 +17,8 @@ from transformers import CLIPTextModel, CLIPTokenizer
 import diffusers as diffusers
 import math
 
+model_name = "./stable-diffusion-v1-4"
+
 # FUNCTIONS ------------------------------------------------------------------------
 
 def autoresize(img, max_p):
@@ -43,7 +45,7 @@ def load_pipeline(model):
     clear_cuda_memory()
     pipeline = getattr(diffusers, chosen_pipeline["pipeline"])
     pipe = pipeline.from_pretrained(
-        "./stable-diffusion-v1-4",
+        model_name,
         text_encoder=text_encoder,
         tokenizer=tokenizer,
         revision="fp16",
@@ -56,7 +58,7 @@ def load_pipeline(model):
 
 def clear_cuda_memory():
     global pipe, torch
-    del pipe
+    pipe = None
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -170,6 +172,15 @@ If there are none, write 'None'.\nHere is the given text:\n {text}"""
     print(f'facts response "{response}"')
     return response
 
+def combine_prompts_gpt(prompt1, prompt2):
+    combine_prompt = f"""You are given two text prompts. Your job is to write a single prompt based on a combination of the two given prompts. combine the following two prompts:
+1) {prompt1}
+2) {prompt2}
+combination:"""
+    response = call_gpt3(combine_prompt)
+    print(f'facts response "{response}"')
+    return response
+
 def call_stable_diffusion(prompt, kwargs):
     kwargs = {
         'generator': kwargs['generator'],
@@ -222,12 +233,11 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 openai.api_key = os.getenv('OPENAI_TOKEN')
 random.seed(time.time())
 
-model_name = "./stable-diffusion-v1-4"
 torch_device = "cuda" if torch.cuda.is_available() else "cpu"
 offload_device = "cpu"
 
 vae = diffusers.AutoencoderKL.from_pretrained(model_name, subfolder="vae")
-tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder="tokenizer")
 text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder="text_encoder")
 unet = diffusers.UNet2DConditionModel.from_pretrained(model_name, subfolder="unet")
 scheduler = diffusers.LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
@@ -308,7 +318,7 @@ async def dream(ctx, *prompt):
             t = float(kwargs['temp']) if 'temp' in kwargs else 0.75
             print(t)
             prompt = prompt_enhance(prompt, temp=t)
-        print(f'\"{prompt}\" by {ctx.author.name}')
+        print(f'\"{prompt}\" by {ctx.author.name} ({i+1}/{n_images})')
         await ctx.send(f"starting dream for `{prompt}` with seed {seed} ({i+1}/{n_images})")
         
         start_time = time.time()
@@ -372,7 +382,7 @@ async def upscale(ctx, *prompt):
     esr_model = RealESRGAN(device1, scale=4)
     esr_model.load_weights('esr\weights\RealESRGAN_x4.pth')
     upscaled_img = esr_model.predict(input_img)
-    path = save_img(upscaled_img, 'upscaled')
+    path = save_img(upscaled_img, 'outputs/upscaled')
     print('done')
     await ctx.send(f"upscaled by {ctx.author.mention}", file=discord.File(path))
 
@@ -470,6 +480,29 @@ async def seamless(ctx, *prompt):
 async def positive(ctx, *prompt):
     positive = get_positivity(' '.join(prompt))
     await ctx.send(f'i think that\'s {"positive" if positive else "negative"}')
+
+
+@bot.command()
+async def finetune(ctx, *prompt):
+    prompt, kwargs = parse_prompt(prompt)
+    images = [PIL_from_url(ctx.message.attachments[i]) for i in range(len(ctx.message.attachments))]
+    n_out_folders = sum([len(folder) for r, d, folder in os.walk('inputs/finetuning')])
+    outfolder_path = f'inputs/finetuning/{n_out_folders}'
+    if not os.path.exists(outfolder_path):
+        os.makedirs(outfolder_path)
+    for image in images:
+        save_img(image, outfolder_path)
+    with open(f'{outfolder_path}/prompt.txt', 'w') as f:
+        f.write(prompt)
+        f.close()
+    print('done')
+    await ctx.send(f'finished saving images for `{prompt}`, will finetune on colab next opportunity i get')
+    
+@bot.command()
+async def combine_prompts(ctx, *prompt):
+    prompt1, prompt2 = ' '.join(prompt).split(';')
+    combined = combine_prompts_gpt(prompt1, prompt2)
+    await ctx.send(f'{combined}')
 
 memory = ''
 yo_context = ''

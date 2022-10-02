@@ -38,12 +38,11 @@ def load_pipeline(model):
     # if loaded_model == model:
     #     return f'model {model} already loaded'
     if model not in pipelines:
-        return f'model {model} not found: try using \'text2img\', \'img2img\', \'inpaint\', or \'seamless\''
+        return f"model {model} not found: try using 'text2img', 'img2img', or 'inpaint'"
 
     global unet, scheduler, vae, text_encoder, tokenizer
-    chosen_pipeline = pipelines[model]
     clear_cuda_memory()
-    pipeline = getattr(diffusers, chosen_pipeline["pipeline"])
+    pipeline = getattr(diffusers, pipelines[model])
     pipe = pipeline.from_pretrained(
         model_name,
         text_encoder=text_encoder,
@@ -259,27 +258,20 @@ for concept in os.listdir('concepts'):
 print('loading pipeline...')
 loaded_model = 'None'
 pipelines = {
-    "text2img": {
-        "pipeline": "StableDiffusionPipeline",
-        # "pad_mode": "zeros"
-    },
-    "img2img": {
-        "pipeline": "StableDiffusionImg2ImgPipeline",
-        # "pad_mode": "zeros"
-    },
-    "inpaint": {
-        "pipeline": "StableDiffusionInpaintPipeline",
-        # "pad_mode": "zeros"
-    },
-    "seamless": {
-        "pipeline": "StableDiffusionPipeline",
-        # "pad_mode": "circular"
-    },
+    "text2img": "StableDiffusionPipeline",
+    "img2img": "StableDiffusionImg2ImgPipeline",
+    "inpaint": "StableDiffusionInpaintPipeline"
 }
 seamless = False
 pipe = None
 pipe = load_pipeline('text2img')
 last_used = time.time()
+
+def separate_alpha_to_inpaint_mask(img):
+    mask = Image.new("RGBA", img.size, (255,255,255,255))
+    black = Image.new("RGBA", img.size, (0,0,0,255))
+    mask.paste(black, mask=img.split()[-1])
+    return img.convert('RGB'), mask
 
 @bot.command()
 async def dream(ctx, *prompt):
@@ -289,26 +281,23 @@ async def dream(ctx, *prompt):
     prompt, kwargs = parse_prompt(prompt)
     n_images = int(kwargs['n']) if 'n' in kwargs else 1
     enhance = True if 'enhance' in kwargs else False
-    if len(ctx.message.attachments) > 0:
+    
+    if loaded_model != "text2img":
+        if len(ctx.message.attachments) == 0:
+            await ctx.send(f'{loaded_model} requires an image attachment')
+            return
         input_img = PIL_from_url(ctx.message.attachments[0].url)
         input_img = autoresize(input_img, 380000)
-        kwargs['init_image'] = input_img
-        if len(ctx.message.attachments) > 1:
-            mask = PIL_from_url(ctx.message.attachments[1].url)
+        if loaded_model == "inpaint":
+            if len(ctx.message.attachments) > 1:
+                # use 2nd attachment as mask
+                mask = PIL_from_url(ctx.message.attachments[1].url)
+                mask = autoresize(mask, 380000)
+            else:
+                # extract alpha as mask
+                input_img,mask = separate_alpha_to_inpaint_mask(input_img)
             kwargs['mask_image'] = mask
-    
-    # require an image pipeline if any attachment
-    if len(ctx.message.attachments) == 1 and loaded_model not in ['img2img']: 
-        await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model img2img` and try again. you need to provide an initial image for img2img to work')
-        return
-    # require inpaint pipeline if more than 1 attachment
-    if len(ctx.message.attachments) > 1 and loaded_model not in ['inpaint']: 
-        await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model inpaint` and try again. you need to provide 2 images (background, mask) for inpaint to work')
-        return
-    # require a text pipeline if no attachment
-    if len(ctx.message.attachments) <= 0 and loaded_model not in ['seamless', 'text2img']: 
-        await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model text2img` and try again. text2img does not work with image attachments')
-        return
+        kwargs['init_image'] = input_img
     
     # generation loop
     for i in range(n_images):

@@ -17,7 +17,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 import diffusers as diffusers
 import math
 
-model_name = "./stable-diffusion-v1-4"
+model_name = "./lyra-diffusion-v1-4"
 
 # FUNCTIONS ------------------------------------------------------------------------
 
@@ -481,6 +481,13 @@ async def positive(ctx, *prompt):
     positive = get_positivity(' '.join(prompt))
     await ctx.send(f'i think that\'s {"positive" if positive else "negative"}')
 
+@bot.command()
+async def invert(ctx, *prompt):
+    image = PIL_from_url(ctx.message.attachments[0])
+    image = ImageOps.invert(image)
+    path = save_img(image, 'outputs/inverted')
+    print('done')
+    await ctx.send(f'inverted', file=discord.File(path))
 
 @bot.command()
 async def finetune(ctx, *prompt):

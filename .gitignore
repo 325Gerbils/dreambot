@@ -8,5 +8,8 @@ stable-diffusion-v1-4/vae/diffusion_pytorch_model.bin
 stable-diffusion-v1-4/text_encoder/pytorch_model.bin
 __pycache__/*
 lyra-diffusion-v1-4/*
+lyra2-diffusion-v1-4/*
 sus-diffusion-v1-4/*
 test-diffusion-v1-4/*
+shankara-diffusion-v1-4/*
+dance-diffusion/*

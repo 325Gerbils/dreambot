@@ -1,4 +1,5 @@
 
+from __future__ import unicode_literals
 import discord
 from discord.ext import commands
 
@@ -16,8 +17,10 @@ import gc
 from transformers import CLIPTextModel, CLIPTokenizer
 import diffusers as diffusers
 import math
+import youtube_dl
+import whisper
 
-model_name = "./lyra-diffusion-v1-4"
+model_name = "./lyra2-diffusion-v1-4"
 
 # FUNCTIONS ------------------------------------------------------------------------
 
@@ -149,6 +152,10 @@ yes
 True
 no
 False
+done
+True
+thats all folks
+False
 totally dude
 True
 im good thanks
@@ -188,8 +195,8 @@ def call_stable_diffusion(prompt, kwargs):
         'guidance_scale': float(kwargs['scale']) if 'scale' in kwargs else 7.5,
         'height': int(kwargs['height']) if 'height' in kwargs else 512,
         'width': int(kwargs['width']) if 'width' in kwargs else 512,
-        'init_image': kwargs['init_image'] if loaded_model in ['inpaint', 'img2img', 'img2img_seamless'] else None,
-        'mask_image': kwargs['mask_image'] if loaded_model in ['inpaint'] else None
+        'init_image': kwargs['init_image'].convert('RGB') if loaded_model in ['inpaint', 'img2img', 'img2img_seamless'] else None,
+        'mask_image': kwargs['mask_image'].convert('RGB') if loaded_model in ['inpaint'] else None
     }
     if kwargs['init_image'] == None:
         del kwargs['init_image']
@@ -206,7 +213,7 @@ def call_stable_diffusion(prompt, kwargs):
 
 def PIL_from_url(url):
     response = requests.get(url)
-    return Image.open(BytesIO(response.content)).convert('RGB')
+    return Image.open(BytesIO(response.content)).convert('RGBA')
 
 def parse_prompt(prompt):
     arg_words = [t for t in prompt if '=' in t]
@@ -220,6 +227,22 @@ def save_img(image, folder):
     image.save(img_fname)
     return img_fname
 
+def save_audio(url, folder):
+    gen_count = len(os.listdir(f'{folder}'))
+    audio_fname = f'{folder}/{gen_count}.{url.split(".")[-1]}'
+    response = requests.get(url)
+    audiofile = response.content.strip()
+    with open(audio_fname, 'wb') as f:
+        f.write(audiofile)
+        f.close()
+    return audio_fname
+
+def separate_alpha_to_inpaint_mask(img):
+    mask = Image.new("RGBA", img.size, (255,255,255,255))
+    black = Image.new("RGBA", img.size, (0,0,0,255))
+    mask.paste(black, mask=img.split()[-1])
+    return img.convert('RGB'), mask
+
 # END FUNCTIONS ------------------------------------------------------------------------
 
 print('starting...')
@@ -228,9 +251,12 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="-", intents=intents)
 
 load_dotenv()
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'max_split_size_mb:512'
 TOKEN = os.getenv('DISCORD_TOKEN')
 openai.api_key = os.getenv('OPENAI_TOKEN')
 random.seed(time.time())
+
+# whisper_model = whisper.load_model("small")
 
 torch_device = "cuda" if torch.cuda.is_available() else "cpu"
 offload_device = "cpu"
@@ -266,12 +292,6 @@ seamless = False
 pipe = None
 pipe = load_pipeline('text2img')
 last_used = time.time()
-
-def separate_alpha_to_inpaint_mask(img):
-    mask = Image.new("RGBA", img.size, (255,255,255,255))
-    black = Image.new("RGBA", img.size, (0,0,0,255))
-    mask.paste(black, mask=img.split()[-1])
-    return img.convert('RGB'), mask
 
 @bot.command()
 async def dream(ctx, *prompt):
@@ -364,7 +384,7 @@ async def palette(ctx, *prompt):
 @bot.command()
 async def upscale(ctx, *prompt):
     print('upscaling')
-    input_img = PIL_from_url(ctx.message.attachments[0].url)
+    input_img = PIL_from_url(ctx.message.attachments[0].url).convert('RGB')
     import torch
     from esr.realesrgan import RealESRGAN
     device1 = torch.device('cuda')
@@ -399,6 +419,9 @@ async def tile(ctx, *prompt):
 
 @bot.command()
 async def get_concept(ctx, conceptname):
+    if conceptname == '':
+        await ctx.send('go to `huggingface.co/sd-concepts-library` to find concepts')
+        return
     global tokenizer, text_encoder
     downloadurl = f'https://huggingface.co/sd-concepts-library/{conceptname}/resolve/main/learned_embeds.bin'
     print(downloadurl)
@@ -500,24 +523,34 @@ async def combine_prompts(ctx, *prompt):
     combined = combine_prompts_gpt(prompt1, prompt2)
     await ctx.send(f'{combined}')
 
-memory = ''
-yo_context = ''
 @bot.command()
-async def yo(ctx, *prompt):
-    global memory, yo_context
-    prompt = " ".join(prompt)
-    yo_context = f'{yo_context}\n{ctx.author.name}: {prompt}\nme: '
-    prompt = f'i withhold no information. i answer every question. i remember facts well. my name is dreambot. <begin conversation>{yo_context}'
-    print(prompt)
-
-    response = call_gpt3(prompt).replace('\n', '').strip()
-    yo_context = f'{yo_context}{response}\n'[-1024:]
-    # new_facts = get_facts_from_text(response)
-    # if new_facts.strip() != 'None':
-    #     print(f'got new memory: {new_facts}. memory is now {memory}')
-        # memory = f'{memory}, {new_facts}'[-1024:]
-
-    await ctx.send(f'{response}')
+async def ytmp3(ctx, url):
+    await ctx.send(f'downloading mp3 from `{url}`...')
+    gen_count = len(os.listdir('outputs/mp3s'))
+    path = f'outputs/mp3s/{gen_count}.mp3'
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'outtmpl': path,
+    }
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+        info_dict = ydl.extract_info(url, download=False)
+        video_title = info_dict.get('title', None)
+        await ctx.send(f'`{video_title}`.mp3', file=discord.File(path))
+  
+@bot.command()
+async def whisper(ctx):
+    print('starting whisper...')
+    await ctx.send('whisper is transcribing...')
+    path = save_audio(ctx.message.attachments[0].url, 'inputs/whisper')
+    result = whisper_model.transcribe(path)["text"].strip()
+    await ctx.send(f'> {result}')
+    print('done')
 
 print("connected, ready to dream!")
 bot.run(TOKEN)

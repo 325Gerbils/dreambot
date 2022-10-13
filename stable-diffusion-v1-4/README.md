@@ -1,5 +1,5 @@
 ---
-license: other
+license: creativeml-openrail-m
 tags:
 - stable-diffusion
 - stable-diffusion-diffusers
@@ -52,6 +52,8 @@ This weights here are intended to be used with the 🧨 Diffusers library. If yo
 ## Examples
 
 We recommend using [🤗's Diffusers library](https://github.com/huggingface/diffusers) to run Stable Diffusion.
+
+### PyTorch
 
 ```bash
 pip install --upgrade diffusers transformers scipy
@@ -117,6 +119,75 @@ with autocast("cuda"):
     image = pipe(prompt, guidance_scale=7.5).images[0]  
     
 image.save("astronaut_rides_horse.png")
+```
+
+### JAX/Flax
+
+To use StableDiffusion on TPUs and GPUs for faster inference you can leverage JAX/Flax.
+
+Running the pipeline with default PNDMScheduler
+
+```python
+import jax
+import numpy as np
+from flax.jax_utils import replicate
+from flax.training.common_utils import shard
+
+from diffusers import FlaxStableDiffusionPipeline
+
+pipeline, params = FlaxStableDiffusionPipeline.from_pretrained(
+    "CompVis/stable-diffusion-v1-4", revision="flax", dtype=jax.numpy.bfloat16
+)
+
+prompt = "a photo of an astronaut riding a horse on mars"
+
+prng_seed = jax.random.PRNGKey(0)
+num_inference_steps = 50
+
+num_samples = jax.device_count()
+prompt = num_samples * [prompt]
+prompt_ids = pipeline.prepare_inputs(prompt)
+
+# shard inputs and rng
+params = replicate(params)
+prng_seed = jax.random.split(prng_seed, 8)
+prompt_ids = shard(prompt_ids)
+
+images = pipeline(prompt_ids, params, prng_seed, num_inference_steps, jit=True).images
+images = pipeline.numpy_to_pil(np.asarray(images.reshape((num_samples,) + images.shape[-3:])))
+```
+
+**Note**:
+If you are limited by TPU memory, please make sure to load the `FlaxStableDiffusionPipeline` in `bfloat16` precision instead of the default `float32` precision as done above. You can do so by telling diffusers to load the weights from "bf16" branch.
+
+```python
+import jax
+import numpy as np
+from flax.jax_utils import replicate
+from flax.training.common_utils import shard
+
+from diffusers import FlaxStableDiffusionPipeline
+
+pipeline, params = FlaxStableDiffusionPipeline.from_pretrained(
+    "CompVis/stable-diffusion-v1-4", revision="bf16", dtype=jax.numpy.bfloat16
+)
+
+prompt = "a photo of an astronaut riding a horse on mars"
+
+prng_seed = jax.random.PRNGKey(0)
+num_inference_steps = 50
+
+num_samples = jax.device_count()
+prompt = num_samples * [prompt]
+prompt_ids = pipeline.prepare_inputs(prompt)
+
+# shard inputs and rng
+params = replicate(params)
+prng_seed = jax.random.split(prng_seed, 8)
+prompt_ids = shard(prompt_ids)
+
+images = pipeline(prompt_ids, params, prng_seed, num_inference_steps, jit=True).images
+images = pipeline.numpy_to_pil(np.asarray(images.reshape((num_samples,) + images.shape[-3:])))
 ```
 
 # Uses

@@ -13,26 +13,48 @@ import numpy as np
 import torch
 import openai
 from torch import autocast
+import subprocess
 import gc
+import re
 from transformers import CLIPTextModel, CLIPTokenizer
 import diffusers as diffusers
 import math
 import youtube_dl
 import whisper
+from pipeline.unified_pipeline import UnifiedPipeline
 
 model_name = "./lyra2-diffusion-v1-4"
+with open('loaded_model.txt', 'r') as f:
+    model_name = f.read()
+    f.close()
+
+pipelines = {
+    "text2img": "StableDiffusionPipeline",
+    "img2img": "StableDiffusionImg2ImgPipeline",
+    "inpaint": "StableDiffusionInpaintPipeline",
+    "unified": "UnifiedPipeline"
+}
+print(UnifiedPipeline)
 
 # FUNCTIONS ------------------------------------------------------------------------
 
+def restart_program():
+    SCRIPT_FILE_NAME = os.path.basename(__file__)
+    print("Restarting...")
+    run_string = 'python "'+ SCRIPT_FILE_NAME + '"'
+    print(run_string)
+    subprocess.Popen(run_string)
+    exit(0)
+
 def autoresize(img, max_p):
-    img_width, img_height = img.size
-    total_pixels = img_width*img_height
+    w, h = img.size
+    total_pixels = w * h
     if total_pixels > max_p:
-        import math
-        ratio = 632 / math.sqrt(total_pixels)
-        new_size = [64 * int(ratio * s) % 64 for s in img.size]
-        img = img.resize( new_size )
-        return img
+        ratio = 600 / math.sqrt(total_pixels)
+        w, h = map(lambda x: int(x * ratio), (w, h))
+        w, h = map(lambda x: x - x % 64, (w, h))
+        print(w, h)
+        img = img.resize( (w, h) )
     return img
 
 def load_pipeline(model):
@@ -45,7 +67,10 @@ def load_pipeline(model):
 
     global unet, scheduler, vae, text_encoder, tokenizer
     clear_cuda_memory()
-    pipeline = getattr(diffusers, pipelines[model])
+    if model == 'unified':
+        pipeline = UnifiedPipeline
+    else:
+        pipeline = getattr(diffusers, pipelines[model])
     pipe = pipeline.from_pretrained(
         model_name,
         text_encoder=text_encoder,
@@ -187,28 +212,27 @@ combination:"""
     print(f'facts response "{response}"')
     return response
 
+import traceback
 def call_stable_diffusion(prompt, kwargs):
-    kwargs = {
-        'generator': kwargs['generator'],
-        'strength': float(kwargs['strength']) if 'strength' in kwargs else 0.75,
-        'num_inference_steps': int(kwargs['steps']) if 'steps' in kwargs else 50,
-        'guidance_scale': float(kwargs['scale']) if 'scale' in kwargs else 7.5,
-        'height': int(kwargs['height']) if 'height' in kwargs else 512,
-        'width': int(kwargs['width']) if 'width' in kwargs else 512,
-        'init_image': kwargs['init_image'].convert('RGB') if loaded_model in ['inpaint', 'img2img', 'img2img_seamless'] else None,
-        'mask_image': kwargs['mask_image'].convert('RGB') if loaded_model in ['inpaint'] else None
-    }
-    if kwargs['init_image'] == None:
-        del kwargs['init_image']
-    if kwargs['mask_image'] == None:
-        del kwargs['mask_image']
-    if loaded_model in ['inpaint', 'img2img']:
-        del kwargs['width']
-        del kwargs['height']
-
-    with autocast("cuda"):
-        image = pipe(prompt, **kwargs).images[0]
-
+    try:
+        kwargs = {
+            'generator': kwargs['generator'],
+            'strength': float(kwargs['strength']) if 'strength' in kwargs else 0.75,
+            'num_inference_steps': int(kwargs['steps']) if 'steps' in kwargs else 50,
+            'guidance_scale': float(kwargs['scale']) if 'scale' in kwargs else 7.5,
+            'height': int(kwargs['height']) if 'height' in kwargs else 512,
+            'width': int(kwargs['width']) if 'width' in kwargs else 512,
+            'init_image': kwargs['init_image'].convert('RGB') if 'init_image' in kwargs else None,
+            'mask_image': kwargs['mask_image'].convert('RGB') if 'mask_image' in kwargs else None,
+            'negative_prompt': kwargs['negative_prompt'] if 'negative_prompt' in kwargs else '',
+            'outmask_image': kwargs['mask_image'] if 'outmask' in kwargs else None
+        }
+        if 'outmask' in kwargs:
+            del kwargs['outmask']
+        with autocast("cuda"):
+            image = pipe(prompt, **kwargs).images[0]
+    except:
+        traceback.print_exc()
     return image
 
 def PIL_from_url(url):
@@ -261,11 +285,18 @@ random.seed(time.time())
 torch_device = "cuda" if torch.cuda.is_available() else "cpu"
 offload_device = "cpu"
 
-vae = diffusers.AutoencoderKL.from_pretrained(model_name, subfolder="vae")
-tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder="tokenizer")
-text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder="text_encoder")
-unet = diffusers.UNet2DConditionModel.from_pretrained(model_name, subfolder="unet")
-scheduler = diffusers.LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
+try:
+    vae = diffusers.AutoencoderKL.from_pretrained(model_name, subfolder="vae")
+    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder="tokenizer")
+    text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder="text_encoder")
+    unet = diffusers.UNet2DConditionModel.from_pretrained(model_name, subfolder="unet")
+    scheduler = diffusers.LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
+except:
+    model_name = "./stable-diffusion-v1-4"
+    with open('loaded_model.txt', 'w') as f:
+        f.write(model_name)
+        f.close()
+    restart_program()
 
 vae = vae.to(offload_device).half()
 text_encoder = text_encoder.to(offload_device).half()
@@ -283,14 +314,10 @@ for concept in os.listdir('concepts'):
     
 print('loading pipeline...')
 loaded_model = 'None'
-pipelines = {
-    "text2img": "StableDiffusionPipeline",
-    "img2img": "StableDiffusionImg2ImgPipeline",
-    "inpaint": "StableDiffusionInpaintPipeline"
-}
+
 seamless = False
 pipe = None
-pipe = load_pipeline('text2img')
+pipe = load_pipeline('unified')
 last_used = time.time()
 
 @bot.command()
@@ -301,23 +328,22 @@ async def dream(ctx, *prompt):
     prompt, kwargs = parse_prompt(prompt)
     n_images = int(kwargs['n']) if 'n' in kwargs else 1
     enhance = True if 'enhance' in kwargs else False
-    
-    if loaded_model != "text2img":
-        if len(ctx.message.attachments) == 0:
-            await ctx.send(f'{loaded_model} requires an image attachment')
-            return
+    if '[' in prompt:
+        negative_prompt = prompt.split('[')[1].split(']')[0]
+        prompt = "".join([prompt.split('[')[0], prompt.split(']')[1]])
+        kwargs['negative_prompt'] = negative_prompt
+    else:
+        negative_prompt = ''   
+
+    if len(ctx.message.attachments) > 0:
         input_img = PIL_from_url(ctx.message.attachments[0].url)
-        input_img = autoresize(input_img, 380000)
-        if loaded_model == "inpaint":
-            if len(ctx.message.attachments) > 1:
-                # use 2nd attachment as mask
-                mask = PIL_from_url(ctx.message.attachments[1].url)
-                mask = autoresize(mask, 380000)
-            else:
-                # extract alpha as mask
-                input_img,mask = separate_alpha_to_inpaint_mask(input_img)
-            kwargs['mask_image'] = mask
+        input_img = autoresize(input_img, 250_000)
         kwargs['init_image'] = input_img
+        if len(ctx.message.attachments) > 1:
+            # use 2nd attachment as mask
+            mask = PIL_from_url(ctx.message.attachments[1].url)
+            mask = autoresize(mask, 250_000)
+            kwargs['mask_image'] = mask
     
     # generation loop
     for i in range(n_images):
@@ -327,8 +353,8 @@ async def dream(ctx, *prompt):
             t = float(kwargs['temp']) if 'temp' in kwargs else 0.75
             print(t)
             prompt = prompt_enhance(prompt, temp=t)
-        print(f'\"{prompt}\" by {ctx.author.name} ({i+1}/{n_images})')
-        await ctx.send(f"starting dream for `{prompt}` with seed {seed} ({i+1}/{n_images})")
+        print(f'\"{prompt}\" by {ctx.author.name}, {kwargs} ({i+1}/{n_images})')
+        await ctx.send(f"starting dream for `{prompt}{'' if negative_prompt == '' else f'[{negative_prompt}]'}` with seed {seed} ({i+1}/{n_images})")
         
         start_time = time.time()
         try:
@@ -340,7 +366,7 @@ async def dream(ctx, *prompt):
         filename = save_img(image, 'outputs')
         elapsed_time = int(time.time() - start_time)
         last_used = time.time()
-        await ctx.send(f"\"{prompt}\" by {ctx.author.mention} in {elapsed_time}s with seed {seed} ({i+1}/{n_images})", file=discord.File(filename))
+        await ctx.send(f"\"{prompt}{'' if negative_prompt == '' else f'[{negative_prompt}]'}\" by {ctx.author.mention} in {elapsed_time}s with seed {seed} ({i+1}/{n_images})", file=discord.File(filename))
         
 @bot.command()
 async def palette(ctx, *prompt):
@@ -351,7 +377,7 @@ async def palette(ctx, *prompt):
     n_colors = math.floor(float(kwargs['colors'])) if 'colors' in kwargs else 5
     n_colors = (n_colors if n_colors > 3 else 4) if n_colors < 8 else 7
     n_images = int(kwargs['n']) if 'n' in kwargs else 1
-    if loaded_model not in ['text2img']:        
+    if loaded_model not in ['text2img', 'unified']:        
         await ctx.send(f'currently loaded model: {loaded_model}. please run `-load_model text2img` and try again.')
         return
 
@@ -551,6 +577,23 @@ async def whisper(ctx):
     result = whisper_model.transcribe(path)["text"].strip()
     await ctx.send(f'> {result}')
     print('done')
+
+@bot.command()
+async def change_model(ctx, model_name):
+    if model_name not in ['lyra2', 'sus', 'stable'] and ctx.message.author.id != 891221733326090250:
+        await ctx.send(f'cannot find {model_name} in finetunes. try "stable", "sus", or "lyra2"')
+        return
+    model_name = f"./{model_name}-diffusion-v1-4"
+    with open('loaded_model.txt', 'w') as f:
+        f.write(model_name)
+        f.close()
+    await ctx.send(f'reloading with {model_name}')
+    restart_program()
+
+@bot.command()
+async def restart(ctx):
+    await ctx.send('restarting... please wait a minute or two')
+    restart_program()
 
 print("connected, ready to dream!")
 bot.run(TOKEN)

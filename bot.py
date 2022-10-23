@@ -23,7 +23,7 @@ import youtube_dl
 import whisper
 from pipeline.unified_pipeline import UnifiedPipeline
 
-model_name = "./lyra2-diffusion-v1-4"
+model_name = "./lyra-diffusion-v1-5"
 with open('loaded_model.txt', 'r') as f:
     model_name = f.read()
     f.close()
@@ -73,6 +73,8 @@ def load_pipeline(model):
         pipeline = getattr(diffusers, pipelines[model])
     pipe = pipeline.from_pretrained(
         model_name,
+        unet=unet,
+        scheduler=scheduler,
         text_encoder=text_encoder,
         tokenizer=tokenizer,
         revision="fp16",
@@ -229,7 +231,7 @@ def call_stable_diffusion(prompt, kwargs):
         }
         if 'outmask' in kwargs:
             del kwargs['outmask']
-        with autocast("cuda"):
+        with autocast("cuda"), torch.inference_mode():
             image = pipe(prompt, **kwargs).images[0]
     except:
         traceback.print_exc()
@@ -290,9 +292,13 @@ try:
     tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder="tokenizer")
     text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder="text_encoder")
     unet = diffusers.UNet2DConditionModel.from_pretrained(model_name, subfolder="unet")
-    scheduler = diffusers.LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
-except:
-    model_name = "./stable-diffusion-v1-4"
+    scheduler = diffusers.DDIMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", clip_sample=False, set_alpha_to_one=False)
+    # scheduler = diffusers.LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
+
+except Exception as e:
+    print(f'error loading model: {e}')
+    print('loading stable-diffusion-v1-5')
+    model_name = "./stable-diffusion-v1-5"
     with open('loaded_model.txt', 'w') as f:
         f.write(model_name)
         f.close()
@@ -583,7 +589,7 @@ async def change_model(ctx, model_name):
     if model_name not in ['lyra2', 'sus', 'stable'] and ctx.message.author.id != 891221733326090250:
         await ctx.send(f'cannot find {model_name} in finetunes. try "stable", "sus", or "lyra2"')
         return
-    model_name = f"./{model_name}-diffusion-v1-4"
+    model_name = f"./{model_name}-diffusion-v1-5"
     with open('loaded_model.txt', 'w') as f:
         f.write(model_name)
         f.close()

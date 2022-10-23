@@ -1,1 +1,1 @@
-./stable-diffusion-v1-4
+./lyra-diffusion-v1-5

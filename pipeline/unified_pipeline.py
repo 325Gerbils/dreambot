@@ -13,7 +13,7 @@ from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 from diffusers.configuration_utils import FrozenDict
 from diffusers.models import AutoencoderKL, UNet2DConditionModel
 from diffusers.pipeline_utils import DiffusionPipeline
-from diffusers.schedulers import LMSDiscreteScheduler, PNDMScheduler
+from diffusers.schedulers import LMSDiscreteScheduler, PNDMScheduler, DDIMScheduler
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 
@@ -112,7 +112,7 @@ class UnifiedPipeline(DiffusionPipeline):
         feature_extractor: CLIPFeatureExtractor,
     ):
         super().__init__()
-        scheduler = scheduler.set_format("pt")
+        # scheduler = scheduler.set_format("pt")
 
         if hasattr(scheduler.config, "steps_offset") and scheduler.config.steps_offset != 1:
             warnings.warn(
@@ -201,7 +201,7 @@ class UnifiedPipeline(DiffusionPipeline):
         latents: Optional[torch.FloatTensor] = None,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
-        run_safety_checker: bool = True,
+        run_safety_checker: bool = False,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -312,7 +312,8 @@ class UnifiedPipeline(DiffusionPipeline):
             latents = latents.to(self.device)
 
             # if we use LMSDiscreteScheduler, let's make sure latents are mulitplied by sigmas
-            if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):
+            # if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):
+            if self.scheduler._class_name != 'DDIMScheduler' and self.scheduler._class_name != 'PNDMScheduler':
                 latents = latents * self.scheduler.sigmas[0]
 
             t_start = 0
@@ -423,7 +424,8 @@ class UnifiedPipeline(DiffusionPipeline):
             offset = self.scheduler.config.get("steps_offset", 0)
             init_timestep = int(num_inference_steps * strength) + offset
             init_timestep = min(init_timestep, num_inference_steps)
-            if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):
+            # if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):
+            if self.scheduler._class_name != 'DDIMScheduler' and self.scheduler._class_name != 'PNDMScheduler':
                 timesteps = torch.tensor(
                     [num_inference_steps - init_timestep] * batch_size, dtype=torch.long, device=self.device
                 )
@@ -494,7 +496,8 @@ class UnifiedPipeline(DiffusionPipeline):
 
             # expand the latents if we are doing classifier free guidance
             latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-            if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):            
+            # if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):            
+            if self.scheduler._class_name != 'DDIMScheduler' and self.scheduler._class_name != 'PNDMScheduler':
                 sigma = self.scheduler.sigmas[t_index]
                 # the model input needs to be scaled to match the continuous ODE formulation in K-LMS
                 latent_model_input = latent_model_input / ((sigma**2 + 1) ** 0.5)
@@ -512,7 +515,8 @@ class UnifiedPipeline(DiffusionPipeline):
             # compute the previous noisy sample x_t -> x_t-1
             if mode == "inpaint":
                 # compute the previous noisy sample x_t -> x_t-1
-                if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):
+                # if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):
+                if self.scheduler._class_name != 'DDIMScheduler' and self.scheduler._class_name != 'PNDMScheduler':
                     latents = self.scheduler.step(noise_pred, t_index, latents, **extra_step_kwargs).prev_sample
                     # masking
                     init_latents_proper = self.scheduler.add_noise(init_latents_orig, noise, torch.tensor(t_index))
@@ -530,7 +534,8 @@ class UnifiedPipeline(DiffusionPipeline):
 
                 latents = (init_latents_proper * iteration_mask) + (latents * (1 - iteration_mask))
             else:
-                if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):
+                # if not isinstance(self.scheduler, DDIMScheduler) and not isinstance(self.scheduler, PNDMScheduler):
+                if self.scheduler._class_name != 'DDIMScheduler' and self.scheduler._class_name != 'PNDMScheduler':
                     latents = self.scheduler.step(noise_pred, t_index, latents.to(self.unet.device), **extra_step_kwargs).prev_sample
                 else:
                     latents = self.scheduler.step(noise_pred, t.to(self.unet.device), latents.to(self.unet.device), **extra_step_kwargs).prev_sample

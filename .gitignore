@@ -7,4 +7,8 @@ stable-diffusion-v1-5/*
 __pycache__/*
 lyra2-diffusion-v1-4/*
 lyra-diffusion-v1-5/*
+lysh3-diffusion-v1-5/*
 dance-diffusion/*
+stable-diffusion-inpainting/*
+sd-vae-ft-mse/*
+dreambooth/*

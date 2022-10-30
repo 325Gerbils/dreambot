@@ -1,1 +1,1 @@
-./lyra-diffusion-v1-5
+./inpaint-diffusion-v1-5

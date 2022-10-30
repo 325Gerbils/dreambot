@@ -22,6 +22,7 @@ import math
 import youtube_dl
 import whisper
 from pipeline.unified_pipeline import UnifiedPipeline
+from diffusers import StableDiffusionInpaintPipeline
 
 model_name = "./lyra-diffusion-v1-5"
 with open('loaded_model.txt', 'r') as f:
@@ -34,7 +35,6 @@ pipelines = {
     "inpaint": "StableDiffusionInpaintPipeline",
     "unified": "UnifiedPipeline"
 }
-print(UnifiedPipeline)
 
 # FUNCTIONS ------------------------------------------------------------------------
 
@@ -48,6 +48,7 @@ def restart_program():
 
 def autoresize(img, max_p):
     w, h = img.size
+    og_w, og_h = img.size
     total_pixels = w * h
     if total_pixels > max_p:
         ratio = 600 / math.sqrt(total_pixels)
@@ -225,6 +226,7 @@ def call_stable_diffusion(prompt, kwargs):
             'height': int(kwargs['height']) if 'height' in kwargs else 512,
             'width': int(kwargs['width']) if 'width' in kwargs else 512,
             'init_image': kwargs['init_image'].convert('RGB') if 'init_image' in kwargs else None,
+            'image': kwargs['init_image'].convert('RGB') if 'init_image' in kwargs else None,
             'mask_image': kwargs['mask_image'].convert('RGB') if 'mask_image' in kwargs else None,
             'negative_prompt': kwargs['negative_prompt'] if 'negative_prompt' in kwargs else '',
             'outmask_image': kwargs['mask_image'] if 'outmask' in kwargs else None
@@ -323,7 +325,7 @@ loaded_model = 'None'
 
 seamless = False
 pipe = None
-pipe = load_pipeline('unified')
+pipe = load_pipeline('inpaint')
 last_used = time.time()
 
 @bot.command()
@@ -343,12 +345,12 @@ async def dream(ctx, *prompt):
 
     if len(ctx.message.attachments) > 0:
         input_img = PIL_from_url(ctx.message.attachments[0].url)
-        input_img = autoresize(input_img, 250_000)
+        # input_img = autoresize(input_img, 250_000)
         kwargs['init_image'] = input_img
         if len(ctx.message.attachments) > 1:
             # use 2nd attachment as mask
             mask = PIL_from_url(ctx.message.attachments[1].url)
-            mask = autoresize(mask, 250_000)
+            # mask = autoresize(mask, 250_000)
             kwargs['mask_image'] = mask
     
     # generation loop

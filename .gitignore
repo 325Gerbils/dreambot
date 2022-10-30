@@ -12,3 +12,4 @@ dance-diffusion/*
 stable-diffusion-inpainting/*
 sd-vae-ft-mse/*
 dreambooth/*
+inpaint-diffusion-v1-5/*

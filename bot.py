@@ -588,8 +588,8 @@ async def whisper(ctx):
 
 @bot.command()
 async def change_model(ctx, model_name):
-    if model_name not in ['lyra2', 'sus', 'stable'] and ctx.message.author.id != 891221733326090250:
-        await ctx.send(f'cannot find {model_name} in finetunes. try "stable", "sus", or "lyra2"')
+    if model_name not in ['lyra', 'inpaint', 'stable'] and ctx.message.author.id != 891221733326090250:
+        await ctx.send(f'cannot find {model_name} in finetunes. try "stable", "inpaint", or "lyra"')
         return
     model_name = f"./{model_name}-diffusion-v1-5"
     with open('loaded_model.txt', 'w') as f:

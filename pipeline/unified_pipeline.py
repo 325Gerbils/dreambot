@@ -187,6 +187,7 @@ class UnifiedPipeline(DiffusionPipeline):
     def __call__(
         self,
         prompt: Union[str, List[str]],
+        image: Optional[Union[torch.FloatTensor, PIL.Image.Image]] = None,
         init_image: Optional[Union[torch.FloatTensor, PIL.Image.Image]] = None,
         mask_image: Optional[Union[torch.FloatTensor, PIL.Image.Image]] = None,
         outmask_image: Optional[Union[torch.FloatTensor, PIL.Image.Image]] = None,
